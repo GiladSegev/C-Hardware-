@@ -1,0 +1,428 @@
+#define _CRT_SECURE_NO_WARNINGS
+#define NAME_LENGTH 200
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+
+
+typedef struct hw_component
+{
+	char name[NAME_LENGTH];
+	int copies;
+	struct hw_component *next;
+}HW_component;
+
+
+void Read_commands(FILE *fp_actions, FILE *fp_comps, FILE *fp_upcomps, HW_component *hw_list);
+HW_component* Initialize(FILE *fp_comps, FILE *fp_upcomps, FILE *fp_actions, HW_component *hw_list);
+HW_component* newHw(char *name, int copies);
+HW_component*AddHw(HW_component *hw_c, char *name, int copies);
+int clearSpaces(char* name, char* copies);
+HW_component* searchHW(HW_component* hw_list, char* name);
+HW_component* Production(HW_component* hw_list, char* name, int copies);
+HW_component* Fatal_malfunction(HW_component* hw_list, char* broken_name, int broken_copies);
+HW_component* new_name(HW_component *product, char update_name[], HW_component *hw_list);
+HW_component* delet_node(HW_component *head, char *name);
+void read_to_file(HW_component *head, FILE* fp_upcomps);
+void exit_prog(HW_component *hw_list, FILE *fp_comps, FILE *fp_actions, FILE *fp_upcomps);
+
+
+int main(int argc, char *argv[])
+{
+	if(argc != 4)
+	{
+		printf("Error: invalid number of arguments (<%d> instead of 3)\n", (argc - 1));
+		return 1;
+	}
+
+	FILE *fPtrRead = NULL;
+	fPtrRead = fopen(argv[2], "r");
+	if (fPtrRead == NULL)
+	{
+		printf("Error: opening %s failed\n", argv[2]);
+		return 1;
+	}
+
+	FILE* fptr_comps = NULL;
+	fptr_comps = fopen(argv[1], "r");
+	if (fptr_comps == NULL) 
+	{
+		printf("Error: opening %s failed\n", argv[1]);
+		return 1;
+	}
+
+	FILE *fptr_upcomp = NULL;
+	fptr_upcomp = fopen(argv[3], "w");
+	if (fptr_upcomp == NULL) 
+	{
+		printf("Error: opening %s failed\n", argv[3]);
+		return 1;
+	}
+
+	HW_component*hw_list = NULL;
+	Read_commands(fPtrRead, fptr_comps, fptr_upcomp, hw_list);
+
+	return 0;
+}
+
+/*Input: file_actions, file_components, file_update_components
+Return parameter: None
+Function functionality: reads and perform all the commands and data form actions file
+and use the other file pointers in the rest of the program*/
+void Read_commands(FILE *fp_actions, FILE *fp_comps, FILE *fp_upcomps, HW_component *hw_list)
+{
+	char line[NAME_LENGTH], hw_name[NAME_LENGTH] = { NULL };
+	char *divide, *pcopies = { NULL };
+	int hw_copies = 0;
+	char update_name[NAME_LENGTH] = { NULL };
+
+	while (!feof(fp_actions))
+	{
+		int temp = fgets(line, NAME_LENGTH, fp_actions);
+		divide = strtok(line, "$$$");
+		while (divide != NULL) 
+		{
+			if(strcmp(divide, "Initialize\n") == 0)
+			{
+				hw_list = Initialize(fp_comps, fp_upcomps, fp_actions, hw_list);
+			}
+
+			if (strcmp(divide, "Returned_from_customer ") == 0)
+			{
+				divide = strtok(NULL, "$$$");
+				strcpy(hw_name, divide);
+
+				divide = strtok(NULL, "$$$");
+				pcopies = divide;
+
+				hw_copies = clearSpaces(hw_name, pcopies);
+				hw_list = Production(hw_list, hw_name, hw_copies);
+			}
+
+			if (strcmp(divide, "Fire ") == 0)
+			{
+				divide = strtok(NULL, "$$$");
+				strcpy(hw_name, divide);
+
+				divide = strtok(NULL, "$$$");
+				pcopies = divide;
+
+				hw_copies = clearSpaces(hw_name, pcopies);
+				hw_list = Fatal_malfunction(hw_list, hw_name, hw_copies);
+			}
+
+			if (strcmp(divide, "Production ") == 0)
+			{
+				divide = strtok(NULL, "$$$");
+				strcpy(hw_name, divide);
+
+				divide = strtok(NULL, "$$$");
+				pcopies = divide;
+
+				hw_copies = clearSpaces(hw_name, pcopies);
+				hw_list = Production(hw_list, hw_name, hw_copies);
+			}
+
+			if (strcmp(divide, "Rename ") == 0)
+			{
+				divide = strtok(NULL, "$$$");
+				clearSpaces(divide, "0");
+				strcpy(hw_name, divide);
+
+				divide = strtok(NULL, "$$$\n");
+				clearSpaces(divide, "0");
+				strcpy(update_name, divide);
+
+				HW_component *product = searchHW(hw_list, hw_name);
+				if (product == NULL) 
+				{
+					printf("The component %s wasn't found within the components list\n", hw_name); 
+				}
+
+				else 
+					hw_list = new_name(product, update_name, hw_list);
+			}
+
+			if (strcmp(divide, "Fatal_malfunction ") == 0)
+			{
+				divide = strtok(NULL, "$$$");
+				strcpy(hw_name, divide);
+
+				divide = strtok(NULL, "$$$");
+				pcopies = divide;
+
+				hw_copies = clearSpaces(hw_name, pcopies);
+				hw_list = Fatal_malfunction(hw_list, hw_name, hw_copies);
+			}
+
+			if (strcmp(divide, "Finalize") == 0) 
+			{
+				read_to_file(hw_list, fp_upcomps);
+				fclose(fp_comps);
+				fclose(fp_upcomps);
+			}
+
+			divide = strtok(NULL, "$$$");
+		}
+	}
+	fclose(fp_actions);
+}
+
+//Input:file_components,file_update_components,pointer to our list.
+//Return parameter: HW_component *list_head
+//Function functionality: Initializes the list in a organized way
+HW_component* Initialize(FILE *fp_comps, FILE *fp_upcomps, FILE *fp_actions, HW_component *hw_list)
+{
+	char hw[NAME_LENGTH] = "\0";
+	char hw_name[NAME_LENGTH] = "\0", *Ccopies = NULL;
+	char *divide;
+	int hw_copies = 0;
+
+
+	fgets(hw, NAME_LENGTH, fp_comps);
+	divide = strtok(hw, "$$$");
+	while (divide != NULL)
+	{
+		if (!(divide[1] > 47 && divide[1] < 58))
+		{
+			strcpy(hw_name, divide);
+		}
+		else
+		{
+			Ccopies = divide;
+			hw_copies = clearSpaces(hw_name, Ccopies);
+		}
+
+		divide = strtok(NULL, "$$$");
+	}
+	hw_list = newHw(hw_name, hw_copies);
+	if (hw_list == NULL)
+		exit_prog(hw_list, fp_comps, fp_actions, fp_upcomps);
+
+	fgets(hw, NAME_LENGTH, fp_comps);
+	while (!feof(fp_comps))
+	{
+		divide = strtok(hw, "$$$");
+		while (divide != NULL) 
+		{
+			if (!(divide[1] > 47 && divide[1] < 58))
+			{
+				strcpy(hw_name, divide);
+			}
+				
+			else
+			{
+				Ccopies = divide;
+				hw_copies = clearSpaces(hw_name, Ccopies);
+			}
+
+			divide = strtok(NULL, "$$$");
+		}
+		hw_list = AddHw(hw_list, hw_name, hw_copies);
+		if(hw_list == NULL)
+			exit_prog(hw_list, fp_comps, fp_actions, fp_upcomps);
+
+		fgets(hw, NAME_LENGTH, fp_comps);
+	}
+
+	return hw_list;
+}
+
+//Input: char *HW_name, char *HW_copies
+//Return parameter: int HW_copies
+//Function functionality: Delete unnessery spaces from the HW_name and HW_copies 
+//after reading them from the file and convert char *HW_copies to int
+int clearSpaces(char* name, char* copies)
+{
+	int hw_copies = 0, i;
+	name[strlen(name) - 1] = '\0';
+	if (name[0] == 32)
+		for (i = 0; i < strlen(name); i++)
+			name[i] = name[i + 1];
+	sscanf(copies, "%d", &hw_copies);
+	
+	return hw_copies;
+}
+
+
+//Input: char *name, int copies
+//Return parameter: HW_component *new_hw
+//Function functionality: Allocates memory and creates new hw component for our list
+HW_component *newHw(char *name, int copies)
+{
+	HW_component *new_hw = malloc(sizeof(HW_component));
+	if (new_hw == NULL)
+	{
+		printf("Error: memory allocation failed\n");
+		return new_hw;
+	}
+	strcpy(new_hw->name, name);
+	new_hw->copies = copies;
+	new_hw->next = NULL;
+	return new_hw;
+}
+
+//Input: HW_component *hw_c, char *name, int copies
+//Return parameter: HW_component *list_haed
+//Function functionality: Creates a new hw component assisting newHw function
+//and inserting it in an organized order to the hw components list
+HW_component *AddHw(HW_component *hw_c, char *name, int copies)
+{
+	HW_component *curr = NULL, *pre = NULL;
+	HW_component *new_hw;
+	new_hw = newHw(name, copies);
+
+	if (new_hw == NULL)
+		return NULL;
+
+	curr = hw_c;
+	if (strcmp(new_hw->name, curr->name) < 0)
+	{
+		new_hw->next = curr;
+		return new_hw;
+	}
+
+	while (curr != NULL && strcmp(new_hw->name, curr->name) > 0)
+	{
+		pre = curr;
+		curr = curr->next;
+	}
+
+	pre->next = new_hw;
+	new_hw->next = curr;
+	
+	return hw_c;	
+}
+
+//input: HW_component *product, char update_name[], HW_component *hw_list
+//Return parameter: HW_component *List_head
+//Function functionality: Updates hw component's name with a new name and puts it in the correct location in the
+//hw list, while keeping a correct order of the hw components
+HW_component* new_name(HW_component *product, char update_name[], HW_component *hw_list) 
+{
+	int product_copies = product->copies;
+	hw_list = delet_node(hw_list, product->name);
+	hw_list = AddHw(hw_list, update_name, product_copies);
+
+}
+
+// Input: HW_component *head, char *name
+//Return parameter: hw_component *list_head
+//Function functionality: Delete nodes form our list and free all the memory allocated for that node
+HW_component* delet_node(HW_component *head, char *name) 
+{
+	HW_component *iter = head, *prev = NULL;
+
+	if (head == NULL) 
+		return head;
+
+	if (strcmp(head->name, name) == 0) 
+	{
+		iter = head->next;
+		free(head);
+		return iter;
+	}
+
+	prev = iter;
+	iter = iter->next;
+	while (iter != NULL) 
+	{
+		if (strcmp(iter->name, name) == 0) 
+		{
+			prev->next = iter->next;
+			free(iter);
+			break;
+		}
+		prev = iter;
+		iter = iter->next;
+	}
+	return head;
+}
+
+
+//Input: HW_component* hw_list, char* HW_name
+//Return parmeter:HW_component *searched_HW
+/*Function functionality: Search a hw component in the kist and return a pointer to its location.
+Return NULL if can't find it.*/
+HW_component* searchHW(HW_component* hw_list, char* name)
+{
+	HW_component* iter = hw_list;
+	while (iter != NULL)
+	{
+		if (strcmp(iter->name, name) == 0)
+			return iter;
+		iter = iter->next;
+	}
+	return NULL;
+}
+
+//Input: HW_component* hw_list, char* name, int copies
+//Return parameter: HW_component *list_head
+//Function functionality: Adding a number of given copies to the quantity of a given hw_component 
+HW_component* Production(HW_component* hw_list, char* name, int copies)
+{
+	HW_component* found = searchHW(hw_list, name);
+	if (found == NULL)
+		AddHw(hw_list, name, copies);
+	else
+		found->copies += copies;
+	return hw_list;
+}
+
+//Input:our HW_component* hw_list, char* broken_name, int broken_copies
+//Return parameter: HW_component* List_head
+//Function functionality: Recive malfunctioning HW name and number of its mulfunction units,
+//then reduce its quantity by the number of mulfunction units
+HW_component* Fatal_malfunction(HW_component* hw_list, char* broken_name, int broken_copies)
+{
+	HW_component* found = searchHW(hw_list, broken_name);
+	if (found == NULL)
+		return hw_list;
+	if (found->copies < broken_copies)
+		found->copies = 0;
+	else
+		found->copies -= broken_copies;
+
+	return hw_list;
+}
+
+
+//Input: HW_component *head, FILE* fp_upcomps
+//Return parameter: None
+//Function functionality: Print the hw list to the updated_components file and 
+//frees all the allocated memory used in the program for th hw list
+void read_to_file(HW_component *head, FILE* fp_upcomps)
+{
+	while (head != NULL)
+	{
+		fprintf(fp_upcomps, "%s", &head->name);
+		fprintf(fp_upcomps, "$$$ ");
+		if (head->next == NULL)
+		{
+			fprintf(fp_upcomps, "%d", head->copies);
+			head = delet_node(head, head->name);
+			break;
+		}
+		fprintf(fp_upcomps, "%d\n", head->copies);
+		head = delet_node(head, head->name);
+	}
+}
+
+//Input: HW_component *hw_list, FILE *fp_comps, FILE *fp_actions, FILE *fp_upcomps
+//Return parameter: None
+//Function functionality: Exits the program while closing all the files pointer and
+//frees all the memory we allocate to the list
+void exit_prog(HW_component *hw_list, FILE *fp_comps, FILE *fp_actions, FILE *fp_upcomps)
+{
+	HW_component *iter;
+	fclose(fp_actions);
+	fclose(fp_comps);
+	fclose(fp_upcomps);
+
+	while (hw_list != NULL)
+	{
+		iter = hw_list;
+		hw_list = hw_list->next;
+		free(iter);
+	}
+}
